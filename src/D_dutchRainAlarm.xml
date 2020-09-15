@@ -5,14 +5,16 @@
     <minor>0</minor>
   </specVersion>
   <device>
-    <deviceType>urn:schemas-micasaverde-com:device:MotionSensor:1</deviceType>
-    <staticJson>D_MotionSensor1.json</staticJson>
-    <friendlyName>Rain Alarm</friendlyName>
-    <manufacturer>BRutgrink</manufacturer>
-    <manufacturerURL>http://www.buienradar.nl</manufacturerURL>
-    <protocol>cr</protocol>
-    <handleChildren>1</handleChildren>
-    <serviceList>
+	<deviceType>urn:schemas-micasaverde-com:device:FloodSensor:1</deviceType>
+	<staticJson>D_FloodSensor1.json</staticJson>
+	<friendlyName>Rain Alarm</friendlyName>
+	<manufacturer>BRutgrink</manufacturer>
+	<manufacturerURL>http://www.buienradar.nl</manufacturerURL>
+	<Category_Num>4</Category_Num>
+	<SubCategory_Num>2</SubCategory_Num>
+	<protocol>cr</protocol>
+	<handleChildren>1</handleChildren>
+	<serviceList>
 		<service>
 			<serviceType>urn:schemas-brutgrink-com:service:dutchRainAlarm:1</serviceType>
 			<serviceId>urn:brutgrink-com:serviceId:dutchRainAlarm</serviceId>
