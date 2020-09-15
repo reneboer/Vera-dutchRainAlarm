@@ -1,0 +1,236 @@
+<?xml version="1.0"?>
+<implementation>
+  <settings>
+    <protocol>cr</protocol>
+  </settings>
+  <functions>
+	-- 1 Nov 2016 Update by Rene Boer for new URL from buienradar.
+	-- 14 Feb 2018, Update for new URL and two digits for lat/lng
+	-- 15 Sep 2020, Update for fractional numbers for rain amounts
+	
+    local RAINALARM_SERVICE = "urn:brutgrink-com:serviceId:dutchRainAlarm"
+    local DEBUG_MODE = false
+	local PARENT_DEVICE = nil
+
+    function log(text)
+        luup.log("RainAlarm " .. text)
+    end
+
+    function debug(text)
+        if (DEBUG_MODE == true) then
+            log(text)
+        end
+    end
+	-- Do a optimized Get and Set function
+	local function luup_var_get(name, service, device)
+		return luup.variable_get(service or RAINALARM_SERVICE, name, device or PARENT_DEVICE)
+	end
+	-- Only set variable when changed. This reduces Vera memory writes and logging.
+	local function luup_var_set (name, value, service, device)
+		service = service or RAINALARM_SERVICE
+		device = device or PARENT_DEVICE
+		local old = luup_var_get(name, service, device)
+		if tostring(value) ~= old then 
+			luup.variable_set(service, name, value, device)
+		end
+	end
+
+    function refreshCache()
+
+        --
+        debug("refreshCache called")
+        --
+        -- The last parameter is temporary, can be removed in later builds once bug fix
+        -- is in place (http://forum.micasaverde.com/index.php?topic=1608.0)
+        -- Schedule this "up front" to avoid problems should any of the following
+        -- code have a one-off failure (instead of using a pcall()).  Thanks to @mtf
+        -- for the simple suggestion.
+        --
+        luup.call_timer("refreshCache", 1, "2m", "")
+
+--        local url = "http://gps.buienradar.nl/getrr.php?"
+        local url = "https://gadgets.buienradar.nl/data/raintext?"
+
+        --
+        -- If the Location override is set, use it's value, otherwise we'll format a string using
+        -- the Lat/Long that Vera Provides.
+        -- We pre-process the user-provided string to pseudo URL-Encode the Value.
+        -- Use only two digits else there will be a redirect error (301)
+        local location = luup.variable_get(RAINALARM_SERVICE, "Location", PARENT_DEVICE)
+        if (location ~= nil and location ~= "") then
+            url = url .. string.gsub(location, " ", "+")
+        else
+            url = string.format("%slat=%2.2f&amp;lon=%2.2f", url, luup.latitude, luup.longitude)
+        end
+
+        log("refreshCache: " .. url)
+
+        local status, rss = luup.inet.wget(url, 10)
+        debug("refreshCache: " .. status)
+
+        if (status == 0) then
+          log("Successful execution of URL rss=" .. string.gsub(rss, "%c", " "))
+          
+          -- Store the current timestamp
+          luup_var_set("LastUpdate", os.time(),"urn:micasaverde-com:serviceId:HaDevice1", PARENT_DEVICE)
+              
+          local rainTreshold = tonumber(luup_var_get("RainTreshold") or 10)
+          local itemMatch = ""
+          local currentDate = os.date("*t")
+          local rainStart = 0
+          local rainStop = 0
+          
+          -- Split by pattern matching received string into seperate items 
+          for itemMatch in string.gmatch(rss, "[0-9,]+|%d+:%d+") do
+            debug("itemMatch: " .. itemMatch)
+            
+            -- Split item found into amount of rain (first digits) | hours : minutes 
+            for amountRain, atHours,atMinutes in string.gmatch(itemMatch, "[0-9,]+|(%d+):(%d+)") do
+                               
+                -- Create rain time variable calculate the seconds difference between (now) and
+                -- the time found and the amount of rain in mm per hour
+            
+                local rainTime = os.time{
+					year = currentDate.year,
+					month = currentDate.month,
+					day = currentDate.day,
+					hour = tonumber(atHours),
+					min = tonumber(atMinutes)
+				}
+                local rainSeconds = os.difftime(rainTime,os.time())
+                
+                -- Correct rainSeconds if more than 23 hours (23*60*60) seconds difference
+                -- we have an new day (change from 23:mm to 00:mm)
+                
+                if (-82800 > rainSeconds) then
+                    rainSeconds = rainSeconds + 86400
+                end
+                amountRain = tonumber(amountRain)
+                debug("amountRain: " .. amountRain)
+                debug("atHours: " .. atHours)
+                debug("atMinutes: " .. atMinutes)
+                debug("rainSeconds: " .. rainSeconds)
+                debug("rainTreshold: " .. rainTreshold)
+                debug("rainStart: " .. rainStart)
+                
+                -- Test if rain will come above specified treshold
+                -- Time must be in future and not past 
+                if (rainSeconds >= 0) and (amountRain >= rainTreshold) and (rainStart == 0) then
+                    rainStart = rainTime
+                    
+                    -- Store found start time rain and amount to expect
+                    luup_var_set("StartRain", rainTime)
+                    luup_var_set("RainAmount", amountRain)
+                                    
+                    log("Start rain at " .. os.date("%x %X", rainTime, rainTime) .. " is " .. rainTime)
+                end
+
+                -- Check when it will become dry again after rain
+                
+                if (rainSeconds >= 0) and (amountRain == 0) and (rainStart > 0) and (rainStop == 0) then
+                    rainStop = rainTime
+
+                    -- Store found stop time rain (fully dry)
+                    luup_var_set("StopRain", rainTime)
+
+                    log("Stop rain at " .. os.date("%x %X", rainTime, rainTime) .. " is ".. rainTime)
+                end
+            end
+          end
+        else
+          log("Unsuccessvful execution of URL returned status=" .. status)
+        end
+
+        -- Check if tripped time here
+        local startRain = tonumber(luup_var_get("StartRain") or 0)
+        local stopRain = tonumber(luup_var_get("StopRain") or 0)
+        local warningTime = tonumber(luup_var_get("WarningTime") or 0)
+        local tripped = luup_var_get("Tripped", "urn:micasaverde-com:serviceId:SecuritySensor1") or ""
+        local currentTime = os.time()
+        debug("startRain: " .. startRain)
+        debug("stopRain: " .. stopRain)
+        debug("currentTime: " .. currentTime)
+--        if ((currentTime + warningTime) >= startRain) and (stopRain >= currentTime) or (stopRain == 0)) then
+        if (startRain) > 0) and ((currentTime + warningTime) >= startRain) and (stopRain >= currentTime) or (stopRain == 0)) then
+            if (tripped ~= "1") then
+                luup_var_set("Tripped", "1", "urn:micasaverde-com:serviceId:SecuritySensor1")
+            end
+        else
+            if (tripped ~= "0") then
+                luup_var_set("Tripped", "0", "urn:micasaverde-com:serviceId:SecuritySensor1")
+            end
+        end
+        
+    end
+
+    function startup(parentDevice)
+        --
+        -- Validate that the Lat/Long are configured in Vera, otherwise this
+        -- code wont work.
+        --
+        if (luup.latitude == nil or luup.longitude == nil) then
+            luup.set_failure(true)
+            return false, "Location not established in MiOS Preferences/Toolbox, Latitude and Longitude required for Plugin to work.",
+                   "RainAlarm"
+        end
+    
+        log("RainAlarm #" .. tostring(parentDevice) .. " starting up with id " .. luup.devices[parentDevice].id)
+
+        --
+        -- Note these are "pass-by-Global" values that refreshCache will later use.
+        -- I need a var-args version of luup.call_timer(...) to pass these in a
+        -- cleaner manner.
+        --
+        
+        PARENT_DEVICE = parentDevice
+
+        --
+        -- Set variables for Location override, only "set" these if they aren't already set
+        -- to force these variables to appear in Vera's Device list.
+        --
+        if (luup_var_get("Location") == nil) then
+            luup_var_set("Location", "")
+        end
+        if (luup_var_get("StartRain") == nil) then
+            luup_var_set("StartRain", "0")
+        end
+        if (luup_var_get("StopRain") == nil) then
+            luup_var_set("StopRain", "0")
+        end
+        if (luup_var_get("RainAmount") == nil) then
+            luup_var_set("RainAmount", "0")
+        end
+        if (luup_var_get("RainTreshold") == nil) then
+            luup_var_set("RainTreshold", "77")
+        end
+        if (luup_var_get("WarningTime") == nil) then
+            luup_var_set("WarningTime", "600")
+        end
+
+        --
+        -- Do this deferred to avoid slowing down startup processes.
+        --
+        luup.call_timer("refreshCache", 1, "2m", "")
+    end
+  </functions>
+  <incoming>
+      debug("Incoming, really?")
+  </incoming>
+  <startup>startup</startup>
+  <actionList>
+    <action>
+      <serviceId>urn:brutgrink-com:serviceId:dutchRainAlarm</serviceId>
+      <name>SetLocation</name>
+      <run>
+        luup_var_set("Location", lul_settings.location or "")
+      </run>
+    </action>
+    <action>
+      <serviceId>urn:micasaverde-com:serviceId:SecuritySensor1</serviceId>
+      <name>SetArmed</name>
+      <run>
+        luup_var_set("Armed", lul_settings.newArmedValue or "0", "urn:micasaverde-com:serviceId:SecuritySensor1")
+      </run>
+    </action>
+    </actionList>
+</implementation>
