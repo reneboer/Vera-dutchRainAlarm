@@ -87,7 +87,7 @@
             debug("itemMatch: " .. itemMatch)
             
             -- Split item found into amount of rain (first digits) | hours : minutes 
-            for amountRain, atHours, atMinutes in string.gmatch(itemMatch, "([0-9,]+)|(%d+):(%d+)") do
+            for amountRain, atHours, atMinutes in string.gmatch(itemMatch, "([0-9]+).*|(%d+):(%d+)") do
                                
                 -- Create rain time variable calculate the seconds difference between (now) and
                 -- the time found and the amount of rain in mm per hour
@@ -107,7 +107,7 @@
                 if (-82800 > rainSeconds) then
                     rainSeconds = rainSeconds + 86400
                 end
-                amountRain = math.floor(tonumber(amountRain:gsub(",", "\."),10))
+                amountRain = tonumber(amountRain)
                 debug("amountRain: " .. amountRain)
                 debug("atHours: " .. atHours)
                 debug("atMinutes: " .. atMinutes)
