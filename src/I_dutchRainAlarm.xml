@@ -7,6 +7,8 @@
 	-- 1 Nov 2016 Update by Rene Boer for new URL from buienradar.
 	-- 14 Feb 2018, Update for new URL and two digits for lat/lng
 	-- 15 Sep 2020, Update for fractional numbers for rain amounts
+	-- 16 Mar 2021, Fixed coding errors.
+	-- 5 May 2021, Fixed coding errors.
 	
     local RAINALARM_SERVICE = "urn:brutgrink-com:serviceId:dutchRainAlarm"
     local DEBUG_MODE = false
@@ -85,7 +87,7 @@
             debug("itemMatch: " .. itemMatch)
             
             -- Split item found into amount of rain (first digits) | hours : minutes 
-            for amountRain, atHours,atMinutes in string.gmatch(itemMatch, "[0-9,]+|(%d+):(%d+)") do
+            for amountRain, atHours, atMinutes in string.gmatch(itemMatch, "([0-9,]+)|(%d+):(%d+)") do
                                
                 -- Create rain time variable calculate the seconds difference between (now) and
                 -- the time found and the amount of rain in mm per hour
@@ -105,7 +107,7 @@
                 if (-82800 > rainSeconds) then
                     rainSeconds = rainSeconds + 86400
                 end
-                amountRain = tonumber(amountRain)
+                amountRain = math.floor(tonumber(amountRain:gsub(",", "\."),10))
                 debug("amountRain: " .. amountRain)
                 debug("atHours: " .. atHours)
                 debug("atMinutes: " .. atMinutes)
@@ -151,7 +153,7 @@
         debug("stopRain: " .. stopRain)
         debug("currentTime: " .. currentTime)
 --        if ((currentTime + warningTime) >= startRain) and (stopRain >= currentTime) or (stopRain == 0)) then
-        if (startRain) > 0) and ((currentTime + warningTime) >= startRain) and (stopRain >= currentTime) or (stopRain == 0)) then
+        if (startRain > 0) and ((currentTime + warningTime) >= startRain) and ((stopRain >= currentTime) or (stopRain == 0)) then
             if (tripped ~= "1") then
                 luup_var_set("Tripped", "1", "urn:micasaverde-com:serviceId:SecuritySensor1")
             end
